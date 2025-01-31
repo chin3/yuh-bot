@@ -90,15 +90,18 @@ async def ask_question(ctx, round_num, scores):
         await ctx.send(f"⏰ Time's up! The correct answer was **{correct_answer}**.")
 
 def generate_trivia_question(category):
-    """Generates a trivia question using OpenAI."""
+    """Generates a trivia question using OpenAI's newer API format."""
     prompt = f"Generate a multiple-choice trivia question in the category '{category}'. Format as 'Question: ... Answer: ...'"
-    response = openai.Completion.create(
-        engine="gpt-3.5-turbo",
-        prompt=prompt,
-        max_tokens=50,
+    
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",  # Updated model
+        messages=[{"role": "system", "content": "You are a trivia master."},
+                  {"role": "user", "content": prompt}],
+        max_tokens=100,
         temperature=0.7
     )
-    output = response["choices"][0]["text"].strip()
+
+    output = response["choices"][0]["message"]["content"].strip()
     
     if "Question:" in output and "Answer:" in output:
         question = output.split("Question:")[1].split("Answer:")[0].strip()
