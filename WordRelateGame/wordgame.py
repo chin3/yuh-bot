@@ -27,7 +27,7 @@ def get_random_word():
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user}')
+    print(f'Logged in as {bot.user} 7pm')
 
 @bot.command()
 async def signup(ctx):
@@ -97,19 +97,22 @@ async def player_turn(ctx, player):
     try:
         msg = await bot.wait_for("message", timeout=turn_timeout, check=check) #wait turn_timeout long for a message
         word = msg.content.lower()
+        isRelated = nltkhelper.is_word_related(list(used_words)[-1], word)
         
         if word in used_words: #checks if that word is in the set. 
             await ctx.send(f"❌ {player.mention}, that word has already been used! You're eliminated!")
             players.remove(player)
         else:
-            used_words.add(word)
             current_player = get_next_player()
-            if current_player:
+            if current_player and isRelated:
+                used_words.add(word)
                 await ctx.send(f"✅ {word} accepted! {current_player.mention}, your turn!")
                 await player_turn(ctx, current_player)
-            elif not nltkhelper.is_word_related(list(used_words)[-1], word):  # Check if related
-                await ctx.send(f"❌ {player.mention}, {word} is NOT related to {list(used_words)[-1]}! You're eliminated!")
+            elif not isRelated:  # Check if related
+                await ctx.send(f"❌ {player.mention}, {word} is NOT related to {list(used_words)[-1]}! You're eliminated! Related?") #Print error vegetable is NOT related to vegetable! You're eliminated! Related? -
                 players.remove(player)
+                await ctx.send(f"{current_player.mention}, your turn! Your word is", list(used_words)[-1])
+                await player_turn(ctx, current_player)
             else:
                 await ctx.send(f"🎉 **Game Over! {player.mention} wins!** 🎉")
                 reset_game()
