@@ -90,6 +90,9 @@ async def startgamealone(ctx):
 
 async def player_turn(ctx, player):
     global current_player
+
+    if player not in players:
+        return  # Skip the turn if the player was removed
     
     def check(m):
         return m.author == player and m.channel == ctx.channel #check if the player is here
@@ -98,41 +101,66 @@ async def player_turn(ctx, player):
         msg = await bot.wait_for("message", timeout=turn_timeout, check=check) #wait turn_timeout long for a message
         word = msg.content.lower()
         isRelated = nltkhelper.is_word_related(list(used_words)[-1], word)
+
+        #ELIMINATION PHASE
         
-        if word in used_words: #checks if that word is in the set. 
+        if word in used_words: #VALIDATION: Check if word is in the set
             await ctx.send(f"❌ {player.mention}, that word has already been used! You're eliminated!")
             players.remove(player)
+        elif not isRelated: #VALIDATION: Check if word is similar or not 
+            await ctx.send(f"❌ {player.mention}, {word} is NOT related to {list(used_words)[-1]}! You're eliminated!")
+            players.remove(player)
         else:
-            current_player = get_next_player()
-            if current_player and isRelated:
-                used_words.add(word)
+            used_words.add(word) #add new word to the set
+            current_player = get_next_player() #Switch to the next player
+            if current_player:
                 await ctx.send(f"✅ {word} accepted! {current_player.mention}, your turn!")
                 await player_turn(ctx, current_player)
-            elif not isRelated:  # Check if related
-                await ctx.send(f"❌ {player.mention}, {word} is NOT related to {list(used_words)[-1]}! You're eliminated! Related?") #Print error vegetable is NOT related to vegetable! You're eliminated! Related? -
-                players.remove(player)
-                await ctx.send(f"{current_player.mention}, your turn! Your word is", list(used_words)[-1])
+                return
+
+        # PLAYER CHECK
+        if len(players) == 1:
+            await ctx.send(f"🎉 **Game Over! {players[0].mention} wins!** 🎉")
+            reset_game()
+        elif len(players) > 1:
+            current_player = get_next_player()
+            if current_player:
+                await ctx.send(f"{current_player.mention}, your turn! Your word is **{list(used_words)[-1]}**")
                 await player_turn(ctx, current_player)
-            else:
-                await ctx.send(f"🎉 **Game Over! {player.mention} wins!** 🎉")
-                reset_game()
+        else:
+            await ctx.send(f"🎉 **Game Over! No players left.** 🎉")
+            reset_game()
+    
     except asyncio.TimeoutError:
         await ctx.send(f"⏳ {player.mention} took too long! Eliminated!")
         players.remove(player)
-        if len(players) > 1:
-            current_player = get_next_player()
-            await ctx.send(f"Next player: {current_player.mention}")
-            await player_turn(ctx, current_player)
-        else:
+        
+        if len(players) == 1:
             await ctx.send(f"🎉 **Game Over! {players[0].mention} wins!** 🎉")
+            reset_game()
+        elif len(players) > 1:
+            current_player = get_next_player()
+            if current_player:
+                await ctx.send(f"Next player: {current_player.mention}")
+                await player_turn(ctx, current_player)
+        else:
+            await ctx.send(f"🎉 **Game Over! No players left.** 🎉")
             reset_game()
 
 def get_next_player():
-    if players:
-        return players[0] if len(players) == 1 else players[(players.index(current_player) + 1) % len(players)]
-    return None
+    if not players:
+        return None
+    if len(players) == 1:
+        return players[0]
+    # Ensure current_player is still in the list
+    if current_player not in players:
+        return players[0]  # Default to first player if current_player was removed
 
-def reset_game():
+    # Get the next player safely
+    current_index = players.index(current_player)
+    return players[(current_index + 1) % len(players)]
+
+def reset_game(): #reset game
     global game_active, players, used_words, current_player
     game_active = False
     players.clear()
