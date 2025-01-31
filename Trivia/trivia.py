@@ -90,18 +90,22 @@ async def ask_question(ctx, round_num, scores):
         await ctx.send(f"⏰ Time's up! The correct answer was **{correct_answer}**.")
 
 def generate_trivia_question(category):
-    """Generates a trivia question using OpenAI's newer API format."""
+    """Generates a trivia question using OpenAI's updated API."""
+    client = openai.Client()  # ✅ New API requires an instance of the Client class
+
     prompt = f"Generate a multiple-choice trivia question in the category '{category}'. Format as 'Question: ... Answer: ...'"
     
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",  # Updated model
-        messages=[{"role": "system", "content": "You are a trivia master."},
-                  {"role": "user", "content": prompt}],
+    response = client.chat.completions.create(  # ✅ Updated method
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a trivia master."},
+            {"role": "user", "content": prompt}
+        ],
         max_tokens=100,
         temperature=0.7
     )
 
-    output = response["choices"][0]["message"]["content"].strip()
+    output = response.choices[0].message.content.strip()  # ✅ Correct way to extract response
     
     if "Question:" in output and "Answer:" in output:
         question = output.split("Question:")[1].split("Answer:")[0].strip()
