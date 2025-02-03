@@ -155,7 +155,6 @@ def get_next_player():
     # Ensure current_player is still in the list
     if current_player not in players:
         return players[0]  # Default to first player if current_player was removed
-
     # Get the next player safely
     current_index = players.index(current_player)
     return players[(current_index + 1) % len(players)]
