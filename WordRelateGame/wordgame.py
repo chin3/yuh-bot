@@ -144,16 +144,28 @@ async def player_turn(ctx, player):
         elif not is_related:  
             await ctx.send(f"❌ {player.mention}, {word} is NOT related to {last_word}! (Similarity Score: {similarity_score:.2f}) You're eliminated!")
             players.remove(player)
-        else:
-            word_history.append(word)  
-            current_player = get_next_player(ctx)
-            if current_player:
-                await ctx.send(f"✅ {word} accepted! (Similarity Score: {similarity_score:.2f}) {current_player.mention}, your turn!")
-                await player_turn(ctx, current_player)
-                return
+        
+        # **✅ Check if only one player remains**
+        if len(players) == 1:
+            winner = players[0]
+            await announce_winner(ctx, winner)
+            return  # End game loop
+
+        word_history.append(word)  
+        current_player = get_next_player(ctx)
+        if current_player:
+            await ctx.send(f"✅ {word} accepted! (Similarity Score: {similarity_score:.2f}) {current_player.mention}, your turn!")
+            await player_turn(ctx, current_player)
+
     except asyncio.TimeoutError:
         await ctx.send(f"⏳ {player.mention} took too long! Eliminated!")
         players.remove(player)
+        
+        # **✅ Check if only one player remains after timeout**
+        if len(players) == 1:
+            winner = players[0]
+            await announce_winner(ctx, winner)
+            return  # End game loop
 
 def get_next_player(ctx):
     """ Get the next player in the rotation, skipping eliminated players. """
