@@ -38,6 +38,21 @@ async def signup(ctx):
     else:
         await ctx.send("You're already signed up!")
 
+async def getPetSprite(ctx, speciesName):
+    sprite_path = f"assets/species/{speciesName}.png"
+    if not os.path.exists(sprite_path):
+        await ctx.send(f"⚠️ Error: Pet sprite not found! Expected path: `{sprite_path}`")
+        await ctx.send(f"DEBUG: Current working directory: {os.getcwd()}")
+        return
+    try:
+        with open(sprite_path, "rb") as sprite_file:
+            print(f"DEBUG: Looking for sprite at {sprite_path}")
+            picture = discord.File(sprite_file)
+            return picture
+
+    except FileNotFoundError:
+        await ctx.send("⚠️ Error: Pet sprite not found!")
+
 @bot.command()
 async def hatch(ctx):
     """Allows a user to hatch a pet if they don't have one"""
@@ -49,7 +64,7 @@ async def hatch(ctx):
     if not user:
         await ctx.send("You need to sign up first! Use `!signup`.")
     elif len(pets) != 0:  # Only allows 1 pet for now
-        await ctx.send("PET COUNT - " + str(len(pets)))
+        #await ctx.send("PET COUNT - " + str(len(pets)))
         await ctx.send("You already have a pet!")
     else:
         # Randomly select species and elemental type
@@ -60,7 +75,9 @@ async def hatch(ctx):
             f"✨ A {species.name} with {elemental_type.name} element has been hatched! "
             "What would you like to name your new pet? Reply with `!name <your pet's name>`. Expires in 2 Minutes"
         )
-
+        sprite = await getPetSprite(ctx, species.name.lower())
+        await ctx.send(file=sprite)
+        
         def check(m):
             return m.author == ctx.author and m.content.startswith("!name ")
 
@@ -75,6 +92,35 @@ async def hatch(ctx):
             await ctx.send(f"🎉 Congrats! Your {elemental_type} {species.name} named **{pet_name}** has been hatched!")
         except TimeoutError:
             await ctx.send("⏳ You took too long to name your pet! Try again with `!hatch`.")
+
+@bot.command()
+async def release(ctx):
+    """Allows a user to release (delete) their pet, setting is_alive to 0."""
+    discord_id = ctx.author.id
+    pets = db.get_pet(discord_id)
+
+    if not pets:
+        await ctx.send("You don't have a pet to release!")
+        return
+
+    pet = pets[0]  # Assuming one pet per user for now
+
+    await ctx.send(
+        f"⚠️ Are you sure you want to release **{pet.name}**? This action is irreversible! "
+        "Type `!confirmrelease` within 30 seconds to proceed."
+    )
+
+    def check(m):
+        return m.author == ctx.author and m.content.lower() == "!confirmrelease"
+
+    try:
+        await bot.wait_for("message", check=check, timeout=30.0)
+        db.cursor.execute("UPDATE pet SET is_alive = 0 WHERE pet_id = ?", (pet.pet_id,))
+        db.conn.commit()
+
+        await ctx.send(f"💔 {pet.name} has been released and is no longer with you.")
+    except TimeoutError:
+        await ctx.send("⏳ Release action canceled. Your pet is safe!")
 
 @bot.command()
 async def getpets(ctx):
