@@ -1,52 +1,43 @@
 import nltk
 from nltk.corpus import wordnet
+import gensim.downloader as api
 
-# Download WordNet if not already installed
-print("starting")
-nltk.download("wordnet")
+# Load Word2Vec Model
+word2vec_model = api.load("word2vec-google-news-300")
 
-def is_word_related(word1, word2):
-    """Check if two words are related using WordNet synonyms."""
+# Ensure WordNet is available
+try:
+    wordnet.synsets("test")
+except LookupError:
+    print("Downloading WordNet...")
+    nltk.download("wordnet")
+
+def get_similarity_score(word1, word2):
+    """Returns the highest similarity score between two words using WordNet and Word Embeddings."""
+    
+    # ✅ **Step 1: WordNet Similarity Score**
     synsets1 = wordnet.synsets(word1)
     synsets2 = wordnet.synsets(word2)
     
-    if not synsets1 or not synsets2:
-        return False  # No definition found
+    max_wordnet_score = 0  # Track highest WordNet similarity
+    if synsets1 and synsets2:
+        for syn1 in synsets1:
+            for syn2 in synsets2:
+                similarity_score = syn1.wup_similarity(syn2)
+                if similarity_score:
+                    max_wordnet_score = max(max_wordnet_score, similarity_score)
 
-    # Check if they share synonyms
-    for syn1 in synsets1:
-        for syn2 in synsets2:
-            similarity_score = syn1.wup_similarity(syn2)
-            print("Simularity score for " + word1 + " and " + word2 + " is:", similarity_score)
-            if similarity_score > 0.8:  # 80% similarity threshold can change
-                return True
-    return False
-
-
-
-
-
-def similarity_score_word_related(word1, word2):
-    """Check if two words are related using WordNet synonyms."""
-    synsets1 = wordnet.synsets(word1)
-    synsets2 = wordnet.synsets(word2)
+    # ✅ **Step 2: Word Embeddings Similarity Score**
+    try:
+        embedding_score = word2vec_model.similarity(word1, word2)
+    except KeyError:
+        embedding_score = 0  # Word not found in Word2Vec
     
-    if not synsets1 or not synsets2:
-        return -1  # No definition found
+    # ✅ **Step 3: Return the best available similarity score**
+    return max(max_wordnet_score, embedding_score)
 
-    # Check if they share synonyms
-    for syn1 in synsets1:
-        for syn2 in synsets2:
-            similarity_score = syn1.wup_similarity(syn2)
-            print("Simularity score for " + word1 + " and " + word2 + " is:", similarity_score)
- #           if similarity_score > 0.5:  # 50% similarity threshold
- #               return True
-    return similarity_score
-
-
-
-#print(is_word_related('chair', 'running'))
-#print(is_word_related('chair', 'orange'))
-#print(is_word_related('chair', 'stool'))
-#print(is_word_related('chair', 'chair'))
-#print(is_word_related('chair', 'armchair'))
+def is_word_related(word1, word2, wordnet_threshold=0.8, embedding_threshold=0.5):
+    """Check if two words are related based on similarity scores."""
+    similarity_score = get_similarity_score(word1, word2)
+    print(f"Similarity Score ({word1} ↔ {word2}): {similarity_score}")
+    return similarity_score >= min(wordnet_threshold, embedding_threshold)

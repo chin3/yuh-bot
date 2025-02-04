@@ -86,6 +86,7 @@ async def getpets(ctx):
 
 @bot.command()
 async def feed(ctx):
+    #right now automatically just gives the pet 20 food. Will eventually have it based on items in your inventory.
     """Feed the pet to extend lifespan and reduce hunger"""
     discord_id = ctx.author.id
     pets = db.get_pet(discord_id)
@@ -113,6 +114,96 @@ async def petstatus(ctx):
         response.append(f"🍼 {pet.name} | Hunger: {pet.hunger} | Lifespan: {pet.LIFESPAN} hours or {pet.LIFESPAN/24} days")
 
     await ctx.send("\n".join(response))
+
+#BATTLE MECHANIC
+battles = {}  # Dictionary to track active battles
+
+@bot.command()
+async def challenge(ctx, opponent: discord.Member):
+    if opponent.id == ctx.author.id:
+        await ctx.send("You can't challenge yourself!")
+        return
+    
+    battles[ctx.author.id] = {
+        "opponent": opponent.id,
+        "accepted": False
+    }
+    
+    await ctx.send(f"{opponent.mention}, you have been challenged to a pet battle by {ctx.author.mention}! Type `!accept` or `!reject`.")
+
+@bot.command()
+async def accept(ctx):
+    for challenger_id, battle in battles.items():
+        if battle["opponent"] == ctx.author.id:
+            battles[challenger_id]["accepted"] = True
+            await ctx.send(f"{ctx.author.mention} has accepted the battle! The fight begins now.")
+            await start_battle(ctx, challenger_id, ctx.author.id)
+            return
+    
+    await ctx.send("You haven't been challenged to a battle!")
+
+@bot.command()
+async def reject(ctx):
+    for challenger_id, battle in battles.items():
+        if battle["opponent"] == ctx.author.id:
+            del battles[challenger_id]
+            await ctx.send(f"{ctx.author.mention} has rejected the challenge. No battle today!")
+            return
+    
+    await ctx.send("You haven't been challenged to a battle!")
+
+async def start_battle(ctx, player1_id, player2_id):
+    player1_pet = db.get_pet(player1_id)[0]
+    player2_pet = db.get_pet(player2_id)[0]
+    
+    if not player1_pet or not player2_pet:
+        await ctx.send("Both players must have a pet to battle!")
+        return
+    
+    await ctx.send(f"⚔️ {player1_pet.name} (ATK: {player1_pet.ATK}, HP: {player1_pet.HP}) vs {player2_pet.name} (ATK: {player2_pet.ATK}, HP: {player2_pet.HP})! Choose your move: `!attack`, `!block`, or `!run`.")
+    
+    battles[player1_id]["pet"] = player1_pet
+    battles[player2_id]["pet"] = player2_pet
+    battles[player1_id]["turn"] = True  # Player 1 starts
+
+@bot.command()
+async def attack(ctx):
+    for challenger_id, battle in battles.items():
+        if ctx.author.id in (challenger_id, battle["opponent"]) and battle.get("accepted"):
+            attacker_id = ctx.author.id
+            defender_id = battle["opponent"] if attacker_id == challenger_id else challenger_id
+            attacker_pet = battle["pet"]
+            defender_pet = battles[defender_id]["pet"]
+            
+            damage = random.randint(attacker_pet.ATK // 2, attacker_pet.ATK)
+            defender_pet.HP -= damage
+            
+            await ctx.send(f"💥 {attacker_pet.name} attacks {defender_pet.name} for {damage} damage! {defender_pet.name} has {max(0, defender_pet.HP)} HP left.")
+            
+            if defender_pet.HP <= 0:
+                await ctx.send(f"🏆 {attacker_pet.name} wins the battle!")
+                del battles[challenger_id]
+                return
+            
+            battles[challenger_id]["turn"] = not battles[challenger_id]["turn"]
+            return
+    
+    await ctx.send("You are not in a battle!")
+
+@bot.command()
+async def block(ctx):
+    await ctx.send(f"🛡️ {ctx.author.mention} chooses to block! Damage will be reduced next turn.")
+
+@bot.command()
+async def run(ctx):
+    for challenger_id, battle in battles.items():
+        if ctx.author.id in (challenger_id, battle["opponent"]):
+            del battles[challenger_id]
+            await ctx.send(f"{ctx.author.mention} ran away! The battle is over.")
+            return
+    
+    await ctx.send("You are not in a battle!")
+
  
 
 #TASKS and RUNNING JOBS
