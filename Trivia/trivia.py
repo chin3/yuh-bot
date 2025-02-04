@@ -3,43 +3,35 @@ import openai
 import asyncio
 import random
 import os
+import re
 from discord.ext import commands
-from dotenv import load_dotenv  # Import dotenv package
+from dotenv import load_dotenv  
 
-# Load environment variables from .env file
 load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Set OpenAI API Key
 openai.api_key = OPENAI_API_KEY
 
-# Set up bot
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Game state variables
 category = None
-current_question = None
-correct_answer = None
+questions = []
 game_active = False
 
-### 📌 Command: Choose Category ###
 @bot.command()
 async def category(ctx, *, user_category: str):
-    """Users can choose a trivia category."""
     global category
     category = user_category
     await ctx.send(f"Category set to **{category}** ✅")
 
-### 📌 Command: Start Game ###
 @bot.command()
-async def startgame(ctx):
-    """Starts a new trivia game (everyone can participate)."""
-    global game_active
+async def startgame(ctx, num_questions: int = 10):
+    global game_active, questions
 
     if game_active:
         await ctx.send("A game is already in progress! ⏳")
@@ -50,14 +42,18 @@ async def startgame(ctx):
         return
 
     game_active = True
-    await ctx.send(f"🎮 Trivia game is starting! Category: **{category}** 🎮")
+    await ctx.send(f"🎮 Trivia game is starting! Category: **{category}** with {num_questions} questions 🎮")
+    
+    questions = generate_trivia_questions(category, num_questions)
+    if not questions or all(q[0] == "Error generating questions!" for q in questions):
+        await ctx.send("⚠️ Failed to generate questions. Try again later or with a different category.")
+        game_active = False
+        return
+    
+    scores = {}
+    for round_num, (question, answer) in enumerate(questions, start=1):
+        await ask_question(ctx, round_num, num_questions, question, answer, scores)
 
-    scores = {}  # Store scores for all participants
-
-    for round_num in range(1, 11):  # 10 rounds
-        await ask_question(ctx, round_num, scores)
-
-    # Announce winner
     game_active = False
     if scores:
         winner = max(scores, key=scores.get)
@@ -65,54 +61,67 @@ async def startgame(ctx):
     else:
         await ctx.send("🏆 Trivia game over! No one answered any questions. 😢")
 
-async def ask_question(ctx, round_num, scores):
-    """Fetch AI-generated question and check answers from anyone in chat."""
-    global current_question, correct_answer
-
-    # Generate question using OpenAI
-    question, answer = generate_trivia_question(category)
-    current_question = question
-    correct_answer = answer.lower()
-
-    await ctx.send(f"**Round {round_num}/10** 🎲\n**{current_question}** (You have 60 seconds!)")
+async def ask_question(ctx, round_num, total_rounds, question, answer, scores):
+    await ctx.send(f"**Round {round_num}/{total_rounds}** 🎲\n**{question}** (Keep guessing until someone gets it right!)")
 
     def check(m):
-        return m.channel == ctx.channel  # Accept answers from anyone in the channel
-
-    try:
-        response = await bot.wait_for("message", timeout=60.0, check=check)
-        if response.content.lower() == correct_answer:
-            scores[response.author] = scores.get(response.author, 0) + 1
-            await ctx.send(f"✅ {response.author.mention} got it right! The answer was **{correct_answer}**.")
-        else:
-            await ctx.send(f"❌ Incorrect! The correct answer was **{correct_answer}**.")
-    except asyncio.TimeoutError:
-        await ctx.send(f"⏰ Time's up! The correct answer was **{correct_answer}**.")
-
-def generate_trivia_question(category):
-    """Generates a trivia question using OpenAI's updated API."""
-    client = openai.Client()  # ✅ New API requires an instance of the Client class
-
-    prompt = f"Generate a multiple-choice trivia question in the category '{category}'. Format as 'Question: ... Answer: ...'"
+        return m.channel == ctx.channel
     
-    response = client.chat.completions.create(  # ✅ Updated method
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a trivia master."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=100,
-        temperature=0.7
+    while True:
+        try:
+            response = await bot.wait_for("message", timeout=60.0, check=check)
+            user_answer = response.content.lower().strip()
+            
+            multiple_choice_match = re.match(r"([a-zA-Z])\)\.\s*(.*)", answer)
+            if multiple_choice_match:
+                correct_letter = multiple_choice_match.group(1).lower()
+                correct_text = multiple_choice_match.group(2).strip().lower()
+                if user_answer == correct_letter or user_answer == correct_text:
+                    scores[response.author] = scores.get(response.author, 0) + 1
+                    await ctx.send(f"✅ {response.author.mention} got it right!")
+                    return
+            elif user_answer == answer.lower():
+                scores[response.author] = scores.get(response.author, 0) + 1
+                await ctx.send(f"✅ {response.author.mention} got it right!")
+                return
+            
+            await ctx.send("❌ Incorrect! Keep guessing!")
+        except asyncio.TimeoutError:
+            await ctx.send("⏰ Time's up! No one got the correct answer.")
+            return
+
+def generate_trivia_questions(category, num_questions):
+    client = openai.Client()
+    prompt = (
+        f"Generate {num_questions} unique trivia questions in the category '{category}'. "
+        "Return them in a structured format: \n\n"
+        "Question: What is the capital of France?\nAnswer: Paris\n\n"
+        "If multiple choice, format as:\n"
+        "Question: Which of these is a fruit?\nAnswer: a.) Apple, b.) Carrot, c.) Broccoli\nCorrect: a.) Apple"
     )
-
-    output = response.choices[0].message.content.strip()  # ✅ Correct way to extract response
     
-    if "Question:" in output and "Answer:" in output:
-        question = output.split("Question:")[1].split("Answer:")[0].strip()
-        answer = output.split("Answer:")[1].strip()
-        return question, answer
-    else:
-        return "Error generating question!", "Unknown"
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a trivia master."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        output = response.choices[0].message.content.strip().split("\n\n")
+        questions = []
+        for item in output:
+            if "Question:" in item and "Answer:" in item:
+                question = item.split("Question:")[1].split("Answer:")[0].strip()
+                answer = item.split("Answer:")[1].strip()
+                questions.append((question, answer))
+        
+        return questions if questions else [("Error generating questions!", "Unknown")]
+    except Exception as e:
+        print(f"Error generating questions: {e}")
+        return [("Error generating questions!", "Unknown")]
 
-# Run the bot
 bot.run(DISCORD_BOT_TOKEN)
