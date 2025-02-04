@@ -6,6 +6,10 @@ import os
 import re
 from discord.ext import commands
 from dotenv import load_dotenv  
+from rapidfuzz import fuzz
+
+OPTIONAL_WORDS = {"the", "a", "an", "of", "in", "on", "at", "to", "for", "and"}
+
 
 load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -61,45 +65,64 @@ async def startgame(ctx, num_questions: int = 10):
     else:
         await ctx.send("🏆 Trivia game over! No one answered any questions. 😢")
 
+def clean_answer(answer):
+    """Lowercases, strips whitespace, and removes optional words."""
+    return " ".join(word for word in answer.lower().strip().split() if word not in OPTIONAL_WORDS)
+
+def is_fuzzy_match(user_answer, correct_answer, threshold=80):
+    """Checks if the user answer is a close match using fuzzy logic."""
+    return fuzz.ratio(user_answer, correct_answer) >= threshold
+
+def is_partial_match(user_answer, correct_answer):
+    """Allows partial matches if at least one word from the correct answer is in the user's answer."""
+    correct_parts = set(correct_answer.split())
+    user_parts = set(user_answer.split())
+
+    return len(correct_parts & user_parts) > 0  # At least one word must match
+
+
+
 async def ask_question(ctx, round_num, total_rounds, question, answer, scores):
     await ctx.send(f"**Round {round_num}/{total_rounds}** 🎲\n**{question}** (Keep guessing until someone gets it right!)")
 
     def check(m):
         return m.channel == ctx.channel
-    
+
+    correct_answer = clean_answer(answer)  # Normalize the correct answer
+
     while True:
         try:
             response = await bot.wait_for("message", timeout=60.0, check=check)
-            user_answer = response.content.lower().strip()
-            
-            multiple_choice_match = re.match(r"([a-zA-Z])\)\.\s*(.*)", answer)
-            if multiple_choice_match:
-                correct_letter = multiple_choice_match.group(1).lower()
-                correct_text = multiple_choice_match.group(2).strip().lower()
-                if user_answer == correct_letter or user_answer == correct_text:
-                    scores[response.author] = scores.get(response.author, 0) + 1
-                    await ctx.send(f"✅ {response.author.mention} got it right!")
-                    return
-            elif user_answer == answer.lower():
+            user_answer = clean_answer(response.content)
+
+            # Allow fuzzy matching or partial matching
+            if is_fuzzy_match(user_answer, correct_answer) or is_partial_match(user_answer, correct_answer):
                 scores[response.author] = scores.get(response.author, 0) + 1
                 await ctx.send(f"✅ {response.author.mention} got it right!")
                 return
-            
+
             await ctx.send("❌ Incorrect! Keep guessing!")
+
         except asyncio.TimeoutError:
-            await ctx.send("⏰ Time's up! No one got the correct answer.")
+            await ctx.send(f"⏰ Time's up! No one got the correct answer.\n✅ The correct answer was: **{answer}**")
             return
 
 def generate_trivia_questions(category, num_questions):
     client = openai.Client()
     prompt = (
-        f"Generate {num_questions} unique trivia questions in the category '{category}'. "
-        "Return them in a structured format: \n\n"
-        "Question: What is the capital of France?\nAnswer: Paris\n\n"
-        "If multiple choice, format as:\n"
-        "Question: Which of these is a fruit?\nAnswer: a.) Apple, b.) Carrot, c.) Broccoli\nCorrect: a.) Apple"
+        f"Generate {num_questions} unique and challenging trivia questions in the category '{category}'. "
+        "Format them clearly as follows:\n\n"
+        "For standard questions:\n"
+        "Question: What is the capital of France?\n"
+        "Answer: Paris\n\n"
+        "For multiple-choice questions, include four answer choices (a, b, c, d) and specify the correct one:\n"
+        "Question: Which of these is a fruit?\n"
+        "Options: a.) Apple, b.) Carrot, c.) Broccoli, d.) Onion\n"
+        "Correct Answer: a.) Apple\n\n"
+        "Ensure questions vary in difficulty and are factually accurate.\n"
+        "Include a mix of easy, medium, and hard questions.\n"
+        "Ensure no two questions are too similar."
     )
-    
     try:
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
