@@ -129,6 +129,7 @@ async def challenge(ctx, opponent: discord.Member):
         "accepted": False
     }
     
+    print("Battles Dictionary:", battles)  # Debugging output
     await ctx.send(f"{opponent.mention}, you have been challenged to a pet battle by {ctx.author.mention}! Type `!accept` or `!reject`.")
 
 @bot.command()
@@ -153,26 +154,45 @@ async def reject(ctx):
     await ctx.send("You haven't been challenged to a battle!")
 
 async def start_battle(ctx, player1_id, player2_id):
-    player1_pet = db.get_pet(player1_id)[0]
-    player2_pet = db.get_pet(player2_id)[0]
+    player1_pets = db.get_pet(player1_id)
+    player2_pets = db.get_pet(player2_id)
     
-    if not player1_pet or not player2_pet:
+    if not player1_pets or not player2_pets:
         await ctx.send("Both players must have a pet to battle!")
         return
     
+    player1_pet = player1_pets[0]
+    player2_pet = player2_pets[0]
+    
     await ctx.send(f"⚔️ {player1_pet.name} (ATK: {player1_pet.ATK}, HP: {player1_pet.HP}) vs {player2_pet.name} (ATK: {player2_pet.ATK}, HP: {player2_pet.HP})! Choose your move: `!attack`, `!block`, or `!run`.")
     
-    battles[player1_id]["pet"] = player1_pet
-    battles[player2_id]["pet"] = player2_pet
-    battles[player1_id]["turn"] = True  # Player 1 starts
+    battles[player1_id] = {
+        "opponent": player2_id,
+        "pet": player1_pet,
+        "turn": True
+    }
+    
+    battles[player2_id] = {
+        "opponent": player1_id,
+        "pet": player2_pet,
+        "turn": False
+    }
 
 @bot.command()
 async def attack(ctx):
+    print("Battles Dictionary before attack:", battles)  # Debugging
+    
     for challenger_id, battle in battles.items():
         if ctx.author.id in (challenger_id, battle["opponent"]) and battle.get("accepted"):
             attacker_id = ctx.author.id
             defender_id = battle["opponent"] if attacker_id == challenger_id else challenger_id
-            attacker_pet = battle["pet"]
+            
+            # Ensure both players have valid pets
+            if defender_id not in battles or "pet" not in battles[defender_id]:
+                await ctx.send("Error: Defender's pet not found.")
+                return
+            
+            attacker_pet = battles[attacker_id]["pet"]
             defender_pet = battles[defender_id]["pet"]
             
             damage = random.randint(attacker_pet.ATK // 2, attacker_pet.ATK)
@@ -203,8 +223,6 @@ async def run(ctx):
             return
     
     await ctx.send("You are not in a battle!")
-
- 
 
 #TASKS and RUNNING JOBS
 import asyncio

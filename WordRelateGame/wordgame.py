@@ -146,7 +146,7 @@ async def player_turn(ctx, player):
             players.remove(player)
         else:
             word_history.append(word)  
-            current_player = get_next_player()
+            current_player = get_next_player(ctx)
             if current_player:
                 await ctx.send(f"✅ {word} accepted! (Similarity Score: {similarity_score:.2f}) {current_player.mention}, your turn!")
                 await player_turn(ctx, current_player)
@@ -155,19 +155,30 @@ async def player_turn(ctx, player):
         await ctx.send(f"⏳ {player.mention} took too long! Eliminated!")
         players.remove(player)
 
-def get_next_player():
+def get_next_player(ctx):
     """ Get the next player in the rotation, skipping eliminated players. """
-    if not players:
-        return None  # No players left
+    global game_active
 
     if len(players) == 1:
-        return players[0]  # Only one player left, they win
+        # Only one player left, they win
+        winner = players[0]
+        asyncio.create_task(announce_winner(ctx, winner))
+        return None  
+
+    if not players:
+        return None  # No players left
 
     if current_player not in players:
         return players[0]  # Pick the first player if the current player was removed
 
     current_index = players.index(current_player)
     return players[(current_index + 1) % len(players)]
+
+async def announce_winner(ctx, winner):
+    """ Announce the winner in the current channel and reset the game. """
+    global game_active
+    await ctx.send(f"🎉 Congratulations {winner.mention}! You are the winner! 🎉")
+    reset_game()
 
 def reset_game():
     """ Reset game state """
