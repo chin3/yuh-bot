@@ -128,12 +128,11 @@ class Database:
         self.conn.commit()
         return "Pets updated successfully."
 
-    def feed_pet(self, user_id, pet_id):
+    def feed_pet(self, user_id, pet_id): 
         """Feed a pet and update its stats"""
         pet = self.get_pet(user_id)
         if not pet:
             return "You don't have any pets!"
-
         pet = next((p for p in pet if p.pet_id == pet_id), None)
         if not pet:
             return "Invalid pet."

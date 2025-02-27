@@ -77,7 +77,7 @@ async def hatch(ctx):
         )
         sprite = await getPetSprite(ctx, species.name.lower())
         await ctx.send(file=sprite)
-        
+
         def check(m):
             return m.author == ctx.author and m.content.startswith("!name ")
 
@@ -102,9 +102,7 @@ async def release(ctx):
     if not pets:
         await ctx.send("You don't have a pet to release!")
         return
-
     pet = pets[0]  # Assuming one pet per user for now
-
     await ctx.send(
         f"⚠️ Are you sure you want to release **{pet.name}**? This action is irreversible! "
         "Type `!confirmrelease` within 30 seconds to proceed."
@@ -164,30 +162,40 @@ async def petstatus(ctx):
 #BATTLE MECHANIC
 battles = {}  # Dictionary to track active battles
 
+def reset_battle(player1_id, player2_id):
+    """Reset battle state when a fight ends"""
+    battles.pop(player1_id, None)
+    battles.pop(player2_id, None)
+
 @bot.command()
 async def challenge(ctx, opponent: discord.Member):
     if opponent.id == ctx.author.id:
         await ctx.send("You can't challenge yourself!")
         return
-    
+
+    if ctx.author.id in battles:
+        await ctx.send("You are already in a battle!")
+        return
+
     battles[ctx.author.id] = {
         "opponent": opponent.id,
-        "accepted": False
+        "accepted": False,
+        "turn": ctx.author.id
     }
-    
-    print("Battles Dictionary:", battles)  # Debugging output
+
     await ctx.send(f"{opponent.mention}, you have been challenged to a pet battle by {ctx.author.mention}! Type `!accept` or `!reject`.")
 
 @bot.command()
 async def accept(ctx):
     for challenger_id, battle in battles.items():
         if battle["opponent"] == ctx.author.id:
-            battles[challenger_id]["accepted"] = True
-            await ctx.send(f"{ctx.author.mention} has accepted the battle! The fight begins now.")
+            battle["accepted"] = True
+            await ctx.send(f"{ctx.author.mention} has accepted the battle! {bot.get_user(challenger_id).mention}, it's your turn!")
+            
             await start_battle(ctx, challenger_id, ctx.author.id)
             return
-    
     await ctx.send("You haven't been challenged to a battle!")
+
 
 @bot.command()
 async def reject(ctx):
@@ -215,50 +223,51 @@ async def start_battle(ctx, player1_id, player2_id):
     battles[player1_id] = {
         "opponent": player2_id,
         "pet": player1_pet,
-        "turn": True
+        "turn": player1_id,
+        "accepted": True
     }
     
     battles[player2_id] = {
         "opponent": player1_id,
         "pet": player2_pet,
-        "turn": False
+        "turn": player1_id,
+        "accepted": True
     }
 
 @bot.command()
 async def attack(ctx):
-    print("Battles Dictionary before attack:", battles)  # Debugging
-    
-    for challenger_id, battle in battles.items():
-        if ctx.author.id in (challenger_id, battle["opponent"]) and battle.get("accepted"):
-            attacker_id = ctx.author.id
-            defender_id = battle["opponent"] if attacker_id == challenger_id else challenger_id
-            
-            # Ensure both players have valid pets
-            if defender_id not in battles or "pet" not in battles[defender_id]:
-                await ctx.send("Error: Defender's pet not found.")
-                return
-            
-            attacker_pet = battles[attacker_id]["pet"]
-            defender_pet = battles[defender_id]["pet"]
-            
-            damage = random.randint(attacker_pet.ATK // 2, attacker_pet.ATK)
-            defender_pet.HP -= damage
-            
-            await ctx.send(f"💥 {attacker_pet.name} attacks {defender_pet.name} for {damage} damage! {defender_pet.name} has {max(0, defender_pet.HP)} HP left.")
-            
-            if defender_pet.HP <= 0:
-                await ctx.send(f"🏆 {attacker_pet.name} wins the battle!")
-                del battles[challenger_id]
-                return
-            
-            battles[challenger_id]["turn"] = not battles[challenger_id]["turn"]
-            return
-    
-    await ctx.send("You are not in a battle!")
+    attacker_id = ctx.author.id
+    if attacker_id not in battles:
+        await ctx.send("You are not in a battle!")
+        return
 
-@bot.command()
-async def block(ctx):
-    await ctx.send(f"🛡️ {ctx.author.mention} chooses to block! Damage will be reduced next turn.")
+    battle = battles[attacker_id]
+    opponent_id = battle["opponent"]
+
+    if not battle["accepted"]:
+        await ctx.send("The battle has not been accepted yet!")
+        return
+
+    if battle["turn"] != attacker_id:
+        await ctx.send("It's not your turn!")
+        return
+
+    attacker_pet = db.get_pet(attacker_id)[0]
+    defender_pet = db.get_pet(opponent_id)[0]
+
+    damage = random.randint(attacker_pet.ATK // 2, attacker_pet.ATK)
+    defender_pet.HP -= damage
+
+    await ctx.send(f"💥 {attacker_pet.name} attacks {defender_pet.name} for {damage} damage! {defender_pet.name} has {max(0, defender_pet.HP)} HP left.")
+
+    if defender_pet.HP <= 0:
+        await ctx.send(f"🏆 {attacker_pet.name} wins the battle!")
+        reset_battle(attacker_id, opponent_id)
+        return
+
+    battles[attacker_id]["turn"] = opponent_id
+    battles[opponent_id]["turn"] = opponent_id
+    await ctx.send(f"{bot.get_user(opponent_id).mention}, it's your turn!")
 
 @bot.command()
 async def run(ctx):
@@ -269,6 +278,10 @@ async def run(ctx):
             return
     
     await ctx.send("You are not in a battle!")
+
+@bot.command()
+async def block(ctx):
+    await ctx.send(f"🛡️ {ctx.author.mention} chooses to block! Damage will be reduced next turn. Does nothing right now haha")
 
 #TASKS and RUNNING JOBS
 import asyncio
@@ -282,7 +295,7 @@ async def pet_decay_task():
             db.update_pet_decay(user[0])
         await asyncio.sleep(3600)  # Run every hour
 
-@bot.event
+@bot.event 
 async def on_ready():
     """Start the decay task when the bot is ready"""
     print(f"✅ Bot is online! Logged in as {bot.user}")

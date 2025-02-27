@@ -2,14 +2,14 @@ from enum import Enum
 from datetime import datetime, timedelta
 
 class ElementalType(Enum):
-    WATER = 0
-    GRASS = 1
-    FIRE = 2
-    ICE = 3
-    ELECTRIC = 4
-    WIND = 5
-    ROCK = 6
-    NUCLEAR = 7
+    WATER = 0 #Blue
+    GRASS = 1 #Dark Green
+    FIRE = 2  #RED
+    ICE = 3   #Light Blue
+    ELECTRIC = 4 #Yellow
+    WIND = 5 #Silver
+    ROCK = 6 #Brown
+    NUCLEAR = 7 #Bright Green
 
 class SpeciesType(Enum):
     DOG = 0

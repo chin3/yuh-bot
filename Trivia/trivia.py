@@ -26,12 +26,19 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 category = None
 questions = []
 game_active = False
+skip_question = False
 
 @bot.command()
 async def category(ctx, *, user_category: str):
     global category
     category = user_category
     await ctx.send(f"Category set to **{category}** ✅")
+
+@bot.command()
+async def skip(ctx):
+    global skip_question
+    skip_question = True
+    await ctx.send("⏩ Skipping the current question... The correct answer will be revealed!")
 
 @bot.command()
 async def startgame(ctx, num_questions: int = 10):
@@ -83,7 +90,10 @@ def is_partial_match(user_answer, correct_answer):
 
 
 async def ask_question(ctx, round_num, total_rounds, question, answer, scores):
-    await ctx.send(f"**Round {round_num}/{total_rounds}** 🎲\n**{question}** (Keep guessing until someone gets it right!)")
+    global skip_question
+    skip_question = False  # Reset skip flag at the start
+
+    await ctx.send(f"**Round {round_num}/{total_rounds}** 🎲\n**{question}** (Keep guessing until someone gets it right! Use `!skip` to skip this question.)")
 
     def check(m):
         return m.channel == ctx.channel
@@ -91,6 +101,10 @@ async def ask_question(ctx, round_num, total_rounds, question, answer, scores):
     correct_answer = clean_answer(answer)  # Normalize the correct answer
 
     while True:
+        if skip_question:
+            await ctx.send(f"⏩ Question skipped! The correct answer was: **{answer}** ✅")
+            return
+
         try:
             response = await bot.wait_for("message", timeout=60.0, check=check)
             user_answer = clean_answer(response.content)
@@ -146,5 +160,16 @@ def generate_trivia_questions(category, num_questions):
     except Exception as e:
         print(f"Error generating questions: {e}")
         return [("Error generating questions!", "Unknown")]
+
+@bot.command()
+async def quitgame(ctx):
+    global game_active
+    if not game_active:
+        await ctx.send("No game is currently running! ❌")
+        return
+
+    game_active = False
+    await ctx.send("🛑 The trivia game has been ended by the host! 🛑")
+
 
 bot.run(DISCORD_BOT_TOKEN)
