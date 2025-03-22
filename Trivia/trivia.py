@@ -9,8 +9,11 @@ from dotenv import load_dotenv
 from rapidfuzz import fuzz
 import requests
 
-OPTIONAL_WORDS = {"the", "a", "an", "of", "in", "on", "at", "to", "for", "and"}
+import hashlib
+import json
 
+OPTIONAL_WORDS = {"the", "a", "an", "of", "in", "on", "at", "to", "for", "and"}
+USED_QUESTIONS_FILE = "used_questions.json"
 
 load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -28,6 +31,7 @@ category = None
 questions = []
 game_active = False
 skip_question = False
+
 
 @bot.command()
 async def category(ctx, *, user_category: str):
@@ -158,11 +162,14 @@ def get_recent_news():
         return []
 
 def generate_trivia_questions(category, num_questions):
-    """Generate trivia questions with OpenAI, using variation for better diversity."""
+    """Generate trivia questions with OpenAI, ensuring they are unique and avoiding duplicates across sessions."""
     client = openai.Client()
+    used_hashes = load_used_question_hashes()
+    new_hashes = set()
+    questions = []
 
     prompt_templates = [
-        f"Generate {num_questions} challenging and unique trivia questions in the category '{category}'. "
+        f"Generate {{count}} challenging and unique trivia questions in the category '{category}'. "
         "Avoid well-known or overly repeated questions. Use only real, verified information.\n\n"
         "Format them clearly like this:\n"
         "Question: What is the capital of France?\n"
@@ -171,7 +178,7 @@ def generate_trivia_questions(category, num_questions):
         "Vary the difficulty. Make some obscure, some tough. Keep it interesting.\n"
         "No fictional info. No repeated ideas.\n",
 
-        f"Trivia time! Generate {num_questions} high-quality, unique questions in '{category}'. "
+        f"Trivia time! Generate {{count}} high-quality, unique questions in '{category}'. "
         "All questions must be based on true and verified knowledge.\n"
         "Use this format:\n"
         "Question: Who painted the Mona Lisa?\n"
@@ -179,7 +186,7 @@ def generate_trivia_questions(category, num_questions):
         "Answers must be short (under 5 words), not full sentences. No options or multiple choice.\n"
         "Include some hard and obscure questions — make it challenging!\n",
 
-        f"Create {num_questions} trivia questions in the category '{category}', with a mix of medium to hard difficulty. "
+        f"Create {{count}} trivia questions in the category '{category}', with a mix of medium to hard difficulty. "
         "Focus on factual accuracy only. No fictional content.\n"
         "Use the format:\n"
         "Question: What is the capital of Japan?\n"
@@ -188,40 +195,58 @@ def generate_trivia_questions(category, num_questions):
         "Skip common knowledge. Go for specificity, detail, or lesser-known facts.\n",
     ]
 
-    prompt = random.choice(prompt_templates)
-    temperature = round(random.uniform(0.78, 0.92), 2)  # Slight variation
+    attempts = 0
+    max_attempts = 6
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a trivia master."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-            temperature=temperature
-        )
+    while len(questions) < num_questions and attempts < max_attempts:
+        needed = num_questions - len(questions)
+        prompt_template = random.choice(prompt_templates)
+        prompt = prompt_template.format(count=needed + 2)  # Ask for extra to account for filtering
+        temperature = round(random.uniform(0.78, 0.92), 2)
 
-        print(f"DEBUG: OpenAI Raw Response:\n{response}")  # Debugging line
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "You are a trivia master."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=temperature
+            )
 
-        if not response or not response.choices or not response.choices[0].message.content:
-            print("ERROR: Empty or invalid OpenAI response")
-            return [("Error generating questions!", "Unknown")]
+            if not response or not response.choices or not response.choices[0].message.content:
+                print("ERROR: Empty or invalid OpenAI response")
+                break
 
-        output = response.choices[0].message.content.strip().split("\n\n")
-        questions = []
+            output = response.choices[0].message.content.strip().split("\n\n")
 
-        for item in output:
-            if "Question:" in item and "Answer:" in item:
-                question = item.split("Question:")[1].split("Answer:")[0].strip()
-                answer = item.split("Answer:")[1].strip()
-                questions.append((question, answer))
+            for item in output:
+                if "Question:" in item and "Answer:" in item:
+                    question = item.split("Question:")[1].split("Answer:")[0].strip()
+                    answer = item.split("Answer:")[1].strip()
+                    q_hash = hash_question(question)
 
-        return questions if questions else [("Error generating questions!", "Unknown")]
+                    if q_hash in used_hashes or q_hash in new_hashes:
+                        continue  # Skip duplicates
 
-    except Exception as e:
-        print(f"Error generating questions: {e}")
-        return [("Error generating questions!", "Unknown")]
+                    questions.append((question, answer))
+                    new_hashes.add(q_hash)
+
+                    if len(questions) >= num_questions:
+                        break
+
+        except Exception as e:
+            print(f"Error generating questions: {e}")
+            break
+
+        attempts += 1
+
+    used_hashes.update(new_hashes)
+    save_used_question_hashes(used_hashes)
+
+    return questions if questions else [("Error generating questions!", "Unknown")]
+
 
 ##adding random category
 @bot.command()
@@ -293,6 +318,20 @@ async def quitgame(ctx):
 
     game_active = False
     await ctx.send("🛑 The trivia game has been ended by the host! 🛑")
+
+#Hashing previous used answers temporarily to a used file
+def load_used_question_hashes():
+    if os.path.exists(USED_QUESTIONS_FILE):
+        with open(USED_QUESTIONS_FILE, "r") as f:
+            return set(json.load(f))
+    return set()
+
+def save_used_question_hashes(hashes):
+    with open(USED_QUESTIONS_FILE, "w") as f:
+        json.dump(list(hashes), f)
+
+def hash_question(question):
+    return hashlib.sha256(question.encode("utf-8")).hexdigest()
 
 
 bot.run(DISCORD_BOT_TOKEN)
