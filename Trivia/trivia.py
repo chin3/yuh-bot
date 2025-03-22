@@ -7,6 +7,7 @@ import re
 from discord.ext import commands
 from dotenv import load_dotenv  
 from rapidfuzz import fuzz
+import requests
 
 OPTIONAL_WORDS = {"the", "a", "an", "of", "in", "on", "at", "to", "for", "and"}
 
@@ -93,12 +94,14 @@ async def ask_question(ctx, round_num, total_rounds, question, answer, scores):
     global skip_question
     skip_question = False  # Reset skip flag at the start
 
-    await ctx.send(f"**Round {round_num}/{total_rounds}** 🎲\n**{question}** (Keep guessing until someone gets it right! Use `!skip` to skip this question.)")
+    await ctx.send(f"**Round {round_num}/{total_rounds}** 🎲\n**{question}** (Keep guessing until someone gets it right! Use `!skip` to skip this question. Type `!hint` for a multiple-choice hint.)")
 
     def check(m):
         return m.channel == ctx.channel
 
     correct_answer = clean_answer(answer)  # Normalize the correct answer
+
+    hint_given = False  # Track if hint has been provided
 
     while True:
         if skip_question:
@@ -108,6 +111,19 @@ async def ask_question(ctx, round_num, total_rounds, question, answer, scores):
         try:
             response = await bot.wait_for("message", timeout=60.0, check=check)
             user_answer = clean_answer(response.content)
+
+            # If user asks for a hint
+            if user_answer.lower() == "!hint" and not hint_given:
+                hint_given = True
+                options, correct_index = generate_hint_with_ai(answer, category)
+                
+                if options is None:
+                    await ctx.send("⚠️ Could not generate hint. Try answering the question!")
+                    continue
+
+                hint_text = "\n".join(options)
+                await ctx.send(f"🔍 **Hint:** Here are some options:\n\n{hint_text}\n\n(Type the correct answer!)")
+                continue  # Don't check this input as an answer
 
             # Allow fuzzy matching or partial matching
             if is_fuzzy_match(user_answer, correct_answer) or is_partial_match(user_answer, correct_answer):
@@ -121,46 +137,141 @@ async def ask_question(ctx, round_num, total_rounds, question, answer, scores):
             await ctx.send(f"⏰ Time's up! No one got the correct answer.\n✅ The correct answer was: **{answer}**")
             return
 
+def get_recent_news():
+    """Fetch recent news headlines to use for trivia questions."""
+    try:
+        NEWS_API_KEY = os.getenv("NEWS_API_KEY")  # Ensure you set up a news API key
+        if not NEWS_API_KEY:
+            print("Error: NEWS_API_KEY is not set.")
+            return []
+        
+        url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an error for bad responses
+        data = response.json()
+        
+        if "articles" in data:
+            return [article["title"] for article in data["articles"][:5]]  # Fetch top 5 headlines
+        return []
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching news: {e}")
+        return []
+
 def generate_trivia_questions(category, num_questions):
+    """Generate trivia questions with OpenAI."""
     client = openai.Client()
+
+ ##   news_headlines = get_recent_news()
+##    news_context = "\n".join(news_headlines) if news_headlines else "No recent news found."
+
     prompt = (
         f"Generate {num_questions} unique and challenging trivia questions in the category '{category}'. "
+        "Only use well-known, real information as sources. "
+        "Do NOT make up fictional content.\n\n"
         "Format them clearly as follows:\n\n"
         "For standard questions:\n"
         "Question: What is the capital of France?\n"
         "Answer: Paris\n\n"
-        "For multiple-choice questions, include four answer choices (a, b, c, d) and specify the correct one:\n"
-        "Question: Which of these is a fruit?\n"
-        "Options: a.) Apple, b.) Carrot, c.) Broccoli, d.) Onion\n"
-        "Correct Answer: a.) Apple\n\n"
-        "Ensure questions vary in difficulty and are factually accurate.\n"
-        "Include a mix of easy, medium, and hard questions.\n"
-        "Ensure no two questions are too similar."
+        "For standard questions, the answer should not be a sentence and should typically be a single word or a short phrase (no more than 5 words).\n"
+        "No multiple-choice questions.\n"
+        "Ensure questions vary in difficulty, provide a challenge and are factually accurate.\n"
+        "Include a mix of questions that are specific, obscure, medium, or hard questions.\n"
+        "Ensure no two questions are too similar.\n"
     )
+
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a trivia master."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=500,
-            temperature=0.7
+            max_tokens=1000,
+            temperature=0.8
         )
-        
+
+        print(f"DEBUG: OpenAI Raw Response:\n{response}")  # Debugging line
+
+        if not response or not response.choices or not response.choices[0].message.content:
+            print("ERROR: Empty or invalid OpenAI response")
+            return [("Error generating questions!", "Unknown")]
+
         output = response.choices[0].message.content.strip().split("\n\n")
         questions = []
+
         for item in output:
             if "Question:" in item and "Answer:" in item:
                 question = item.split("Question:")[1].split("Answer:")[0].strip()
                 answer = item.split("Answer:")[1].strip()
                 questions.append((question, answer))
-        
+
         return questions if questions else [("Error generating questions!", "Unknown")]
+
     except Exception as e:
         print(f"Error generating questions: {e}")
         return [("Error generating questions!", "Unknown")]
 
+##adding random category
+@bot.command()
+async def randomcategory(ctx):
+    
+    """Randomly selects a trivia category from a predefined list."""
+    global category
+    categories = [
+        "World History", "Science & Technology", "Mythology", "Video Games", 
+        "Anime & Manga", "Famous Inventions", "Geography", "Space & Astronomy", 
+        "Pop Culture", "Music Trivia", "Animals & Nature", "Sports & Olympics", 
+        "Movies & TV Shows", "Food & Beverages", "Art & Literature", 
+        "Cryptocurrency & Finance", "Famous Scientists & Mathematicians", 
+        "Marvel & DC Comics", "Board Games & Tabletop RPGs", "Famous Conspiracies"
+    ]
+    
+    category = random.choice(categories)  # Pick a random category
+    await ctx.send(f"🎲 Random Category Selected: **{category}** 🎲")
+
+def generate_hint_with_ai(correct_answer, category):
+    """Generate AI-powered multiple-choice options with similar incorrect answers."""
+    client = openai.Client()
+
+    prompt = (
+        f"Generate 10 incorrect but plausible answers for a trivia question in the category '{category}'.\n"
+        f"The correct answer is: {correct_answer}\n"
+        "Make the incorrect answers challenging and similar in style to the correct answer.\n"
+        "Do NOT include numbers (like 1., 2., 3.) or dashes before the answers. Just give plain text answers.\n"
+        "Format the answers as follows, one per line with no dashes or numbers:\n"
+        "Apple\n"
+        "Banana\n"
+        "Cherry"
+    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "system", "content": "You are a trivia master."},
+                      {"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0.8
+        )
+
+        incorrect_answers = response.choices[0].message.content.strip().split("\n")
+        incorrect_answers = [ans.strip() for ans in incorrect_answers if ans.strip()]
+
+        # Ensure we only have three incorrect options
+        incorrect_answers = incorrect_answers[:3]
+
+        # Add correct answer and shuffle
+        options = [correct_answer] + incorrect_answers
+        random.shuffle(options)
+
+        # Convert to multiple-choice format (without numbers)
+        labeled_options = [f"{chr(97+i)}.) {option}" for i, option in enumerate(options)]
+        correct_index = options.index(correct_answer)
+
+        return labeled_options, correct_index
+
+    except Exception as e:
+        print(f"Error generating AI hints: {e}")
+        return None, None
+    
 @bot.command()
 async def quitgame(ctx):
     global game_active
