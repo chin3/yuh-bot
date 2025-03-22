@@ -158,26 +158,38 @@ def get_recent_news():
         return []
 
 def generate_trivia_questions(category, num_questions):
-    """Generate trivia questions with OpenAI."""
+    """Generate trivia questions with OpenAI, using variation for better diversity."""
     client = openai.Client()
 
- ##   news_headlines = get_recent_news()
-##    news_context = "\n".join(news_headlines) if news_headlines else "No recent news found."
-
-    prompt = (
-        f"Generate {num_questions} unique and challenging trivia questions in the category '{category}'. "
-        "Only use well-known, real information as sources. "
-        "Do NOT make up fictional content.\n\n"
-        "Format them clearly as follows:\n\n"
-        "For standard questions:\n"
+    prompt_templates = [
+        f"Generate {num_questions} challenging and unique trivia questions in the category '{category}'. "
+        "Avoid well-known or overly repeated questions. Use only real, verified information.\n\n"
+        "Format them clearly like this:\n"
         "Question: What is the capital of France?\n"
         "Answer: Paris\n\n"
-        "For standard questions, the answer should not be a sentence and should typically be a single word or a short phrase (no more than 5 words).\n"
-        "No multiple-choice questions.\n"
-        "Ensure questions vary in difficulty, provide a challenge and are factually accurate.\n"
-        "Include a mix of questions that are specific, obscure, medium, or hard questions.\n"
-        "Ensure no two questions are too similar.\n"
-    )
+        "Keep answers short — one word or a short phrase (max 5 words). No multiple-choice.\n"
+        "Vary the difficulty. Make some obscure, some tough. Keep it interesting.\n"
+        "No fictional info. No repeated ideas.\n",
+
+        f"Trivia time! Generate {num_questions} high-quality, unique questions in '{category}'. "
+        "All questions must be based on true and verified knowledge.\n"
+        "Use this format:\n"
+        "Question: Who painted the Mona Lisa?\n"
+        "Answer: Leonardo da Vinci\n\n"
+        "Answers must be short (under 5 words), not full sentences. No options or multiple choice.\n"
+        "Include some hard and obscure questions — make it challenging!\n",
+
+        f"Create {num_questions} trivia questions in the category '{category}', with a mix of medium to hard difficulty. "
+        "Focus on factual accuracy only. No fictional content.\n"
+        "Use the format:\n"
+        "Question: What is the capital of Japan?\n"
+        "Answer: Tokyo\n\n"
+        "Avoid repetition and ensure each question is distinct and concise (short answers only).\n"
+        "Skip common knowledge. Go for specificity, detail, or lesser-known facts.\n",
+    ]
+
+    prompt = random.choice(prompt_templates)
+    temperature = round(random.uniform(0.78, 0.92), 2)  # Slight variation
 
     try:
         response = client.chat.completions.create(
@@ -187,7 +199,7 @@ def generate_trivia_questions(category, num_questions):
                 {"role": "user", "content": prompt}
             ],
             max_tokens=1000,
-            temperature=0.8
+            temperature=temperature
         )
 
         print(f"DEBUG: OpenAI Raw Response:\n{response}")  # Debugging line
@@ -234,7 +246,7 @@ def generate_hint_with_ai(correct_answer, category):
     client = openai.Client()
 
     prompt = (
-        f"Generate 10 incorrect but plausible answers for a trivia question in the category '{category}'.\n"
+        f"Generate ten incorrect but plausible answers for a trivia question in the category '{category}'.\n"
         f"The correct answer is: {correct_answer}\n"
         "Make the incorrect answers challenging and similar in style to the correct answer.\n"
         "Do NOT include numbers (like 1., 2., 3.) or dashes before the answers. Just give plain text answers.\n"
